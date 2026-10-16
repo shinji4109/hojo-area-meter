@@ -93,6 +93,11 @@
       .quicktools{left:14px;right:auto;width:360px}.areaHud{left:14px;max-width:370px}
     }
     @media(max-height:700px) and (max-width:849px){.app{display:block;grid-template-rows:none}.panel{padding-top:15px}.areaHud .area-value{font-size:1.35rem}}
+    /* Measurement mode switch inside the aerial map HUD */
+    .modeSwitch{display:flex;gap:3px;background:#dce8df;border-radius:10px;padding:3px;margin-bottom:8px;pointer-events:auto}
+    .modeBtn{border:0;border-radius:7px;min-height:36px;padding:5px 15px;flex:1;background:transparent;color:#315444;font-size:.86rem;font-weight:800}
+    .modeBtn.selected{background:var(--green);color:#fff;box-shadow:0 1px 4px #19352a33}
+    .vertex-marker.distance-point{background:#46c8fa;color:#073648}
   </style>
 </head>
 <body>
@@ -105,8 +110,12 @@
     <div id="map" aria-label="地図上で圃場の境界を選択"></div>
     <div class="maphint" id="mapHint">航空写真を3点以上タップして、測りたい範囲を囲んでください。</div>
     <div class="areaHud" aria-live="polite">
-      <div class="area-top"><div class="eyebrow">選択範囲の面積</div><div id="pointCount" class="count">0地点</div></div>
-      <div class="area-value"><span id="areaMain">—</span> <small>m²</small></div>
+      <div class="modeSwitch" role="group" aria-label="測定モード">
+        <button class="modeBtn selected" id="areaModeBtn" type="button" aria-pressed="true">面積</button>
+        <button class="modeBtn" id="distanceModeBtn" type="button" aria-pressed="false">距離</button>
+      </div>
+      <div class="area-top"><div class="eyebrow" id="measureLabel">選択範囲の面積</div><div id="pointCount" class="count">0地点</div></div>
+      <div class="area-value"><span id="areaMain">—</span> <small id="mainUnit">m²</small></div>
       <div id="conversion" class="conversion">3点以上で面積を表示します</div>
     </div>
     <nav class="quicktools" aria-label="計測の操作">
@@ -134,7 +143,7 @@
       <button id="csvBtn" type="button" class="minibtn">CSV出力</button>
       <button id="geoBtn" type="button" class="minibtn">GeoJSON出力</button>
     </div>
-    <p class="smallnote">※ 面積は地球を球体とみなした概算値です。GPSや航空写真の位置には誤差があります。補助金申請・登記・境界確定等の正式測量には使用しないでください。地図の閲覧には通信が必要です。</p>
+    <p class="smallnote">※ 面積・距離はいずれも地球を球体とみなした概算値です。距離はタップした地点間を結ぶ直線・折れ線の水平距離で、道路距離や高低差は含みません。GPSや航空写真の位置には誤差があります。補助金申請・登記・境界確定等の正式測量には使用しないでください。航空写真には通信が必要です。</p>
   </aside>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -148,9 +157,12 @@
   const TSUBO_M2 = 400 / 121;
   const TAN_M2 = TSUBO_M2 * 300;
   let points = [];
+  const pointSets = {area:points, distance:[]};
+  let measureMode = 'area';
   let markers = [];
   let fields = readFields();
   let activeId = null;
+  const activeIds = {area:null, distance:null};
   let gpsPos = null;
   let gpsWatchId = null;
   let gpsMarker = null;
@@ -190,6 +202,24 @@
     }
     return Math.abs(total * EARTH_RADIUS * EARTH_RADIUS / 2);
   }
+  // Great-circle horizontal distance in metres, summed along the tapped polyline.
+  function segmentDistance(a,b) {
+    const dLat=(b.lat-a.lat)*RAD, dLng=(b.lng-a.lng)*RAD;
+    const h=Math.sin(dLat/2)**2 +
+      Math.cos(a.lat*RAD)*Math.cos(b.lat*RAD)*Math.sin(dLng/2)**2;
+    return 2*EARTH_RADIUS*Math.asin(Math.sqrt(Math.max(0,Math.min(1,h))));
+  }
+  function computeDistance(vertices,close=false) {
+    if(vertices.length<2)return 0;
+    let result=0;
+    for(let i=1;i<vertices.length;i++) result+=segmentDistance(vertices[i-1],vertices[i]);
+    if(close&&vertices.length>2)result+=segmentDistance(vertices[vertices.length-1],vertices[0]);
+    return result;
+  }
+  function validDistance() {
+    return points.length >= 2 && computeDistance(points) > .01;
+  }
+  function distanceLabel(m) {return m>=1000 ? fixed(m/1000,3)+' km' : fixed(m,1)+' m';}
   function segmentsIntersect(a,b,c,d) {
     const avgLat = (a.lat + b.lat + c.lat + d.lat) / 4 * RAD;
     const point = p => ({x:p.lng * Math.cos(avgLat), y:p.lat});
@@ -240,9 +270,30 @@
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && !$('panel').hidden) setPanelOpen(false);
   });
+  function setMode(next) {
+    if (next !== 'area' && next !== 'distance') return;
+    if (next === measureMode) return;
+    pointSets[measureMode]=points;
+    activeIds[measureMode]=activeId;
+    measureMode=next;
+    points=pointSets[measureMode];
+    activeId=activeIds[measureMode];
+    $('areaModeBtn').classList.toggle('selected',next==='area');
+    $('distanceModeBtn').classList.toggle('selected',next==='distance');
+    $('areaModeBtn').setAttribute('aria-pressed',String(next==='area'));
+    $('distanceModeBtn').setAttribute('aria-pressed',String(next==='distance'));
+    $('measureLabel').textContent=next==='area' ? '選択範囲の面積' : '選択した線の距離';
+    $('saveBtn').textContent=next==='area' ? '▣ この圃場を保存' : '▣ この距離を保存';
+    draw();
+    setMessage(next==='area' ?
+      '面積測定：3点以上で範囲を囲みます。' :
+      '距離測定：2点で直線距離、3点以上で折れ線の合計距離を計算します。');
+  }
+  $('areaModeBtn').addEventListener('click',()=>setMode('area'));
+  $('distanceModeBtn').addEventListener('click',()=>setMode('distance'));
   map.on('click', e => addPoint({lat:e.latlng.lat, lng:e.latlng.lng}));
   function addPoint(point) {
-    if (points.length >= 80) { setMessage('1つの圃場は80点まで登録できます。', true); return; }
+    if (points.length >= 80) { setMessage('1回の測定は80点まで登録できます。', true); return; }
     points.push({lat:+point.lat, lng:+point.lng});
     draw();
   }
@@ -250,7 +301,7 @@
     markers.forEach(m => map.removeLayer(m));
     markers = [];
     points.forEach((point, index) => {
-      const markerIcon = L.divIcon({className:'',html:`<div class="vertex-marker">${index+1}</div>`,iconSize:[25,25],iconAnchor:[12,12]});
+      const markerIcon = L.divIcon({className:'',html:`<div class="vertex-marker${measureMode==='distance'?' distance-point':''}">${index+1}</div>`,iconSize:[25,25],iconAnchor:[12,12]});
       const marker = L.marker([point.lat, point.lng], {icon:markerIcon,draggable:true,bubblingMouseEvents:false,autoPan:true}).addTo(map);
       marker.bindTooltip(`${index+1}番目の地点：ドラッグで移動`, {direction:'top'});
       marker.on('drag', () => {
@@ -265,26 +316,42 @@
   }
   function drawShape() {
     const coords = points.map(p => [p.lat,p.lng]);
-    polygon.setLatLngs(points.length >= 3 ? coords : []);
-    polyline.setLatLngs(points.length === 2 ? coords : []);
-    const intersect = hasSelfIntersection(points);
-    const area = validPolygon() ? computeArea(points) : null;
+    const isDistance = measureMode==='distance';
+    polygon.setLatLngs(!isDistance && points.length >= 3 ? coords : []);
+    polyline.setLatLngs(isDistance ? (points.length>=2 ? coords : []) : (points.length===2 ? coords : []));
+    polyline.setStyle({
+      color:isDistance?'#30c9f3':'#ffb62e',
+      weight:isDistance?4:3,
+      dashArray:isDistance?null:'7,6'
+    });
+    const intersect = !isDistance && hasSelfIntersection(points);
+    const area = !isDistance && validPolygon() ? computeArea(points) : null;
+    const distance = isDistance && validDistance() ? computeDistance(points) : null;
+    const unit = isDistance && distance!==null && distance>=1000 ? 'km' : isDistance ? 'm' : 'm²';
     $('pointCount').textContent = `${points.length}地点`;
-    $('areaMain').textContent = area == null ? '—' : fixed(area,area<100?2:1);
-    $('conversion').textContent = area == null ? (intersect ? '辺が交差しています。点を移動して修正してください。' : '3点以上で面積を表示します') :
-      `${fixed(area/100)} a  ／  ${fixed(area/10000,4)} ha  ／  ${fixed(area/TAN_M2,3)} 反`;
-    $('saveBtn').disabled = area == null;
-    $('undoBtn').disabled = points.length === 0;
-    $('clearBtn').disabled = points.length === 0;
-    $('fitBtn').disabled = points.length === 0;
-    $('mapHint').textContent = points.length===0 ? '航空写真を3点以上タップして、測りたい範囲を囲んでください。' :
-      (intersect ? '線が交差しています。番号付きの点をドラッグして調整してください。' : 'さらに点を追加できます。番号付きの点はドラッグで調整できます。');
+    $('mainUnit').textContent=unit;
+    $('areaMain').textContent = isDistance ?
+      (distance===null?'—':distance>=1000?fixed(distance/1000,3):fixed(distance,1)) :
+      (area===null?'—':fixed(area,area<100?2:1));
+    $('conversion').textContent = isDistance ?
+      (distance===null?'2点以上で距離を表示します':
+        `最後の区間 ${distanceLabel(segmentDistance(points[points.length-2],points[points.length-1]))} ／ 計${points.length-1}区間`) :
+      (area===null?(intersect?'辺が交差しています。点を移動して修正してください。':'3点以上で面積を表示します'):
+        `${fixed(area/100)} a ／ ${fixed(area/10000,4)} ha ／ ${fixed(area/TAN_M2,3)} 反 ／ 外周 ${distanceLabel(computeDistance(points,true))}`);
+    $('saveBtn').disabled = isDistance ? distance===null : area===null;
+    $('undoBtn').disabled=points.length===0;
+    $('clearBtn').disabled=points.length===0;
+    $('fitBtn').disabled=points.length===0;
+    $('mapHint').textContent = isDistance ?
+      (points.length===0?'航空写真を2点タップして距離を測定します。':points.length===1?'もう1点タップすると距離が表示されます。':'点を追加すると合計距離を測れます。点のドラッグで微調整できます。') :
+      (points.length===0?'航空写真を3点以上タップして、測りたい範囲を囲んでください。':
+        intersect?'線が交差しています。番号付きの点をドラッグして調整してください。':'さらに点を追加できます。番号付きの点はドラッグで調整できます。');
     polygon.setStyle({color:intersect?'#c74035':'#ffb62e',fillColor:intersect?'#de6551':'#ffcb4b'});
   }
   $('undoBtn').addEventListener('click', () => { if(points.length){points.pop();draw();} });
   $('clearBtn').addEventListener('click', () => {
     if (points.length && !confirm('今の描画を消去しますか？（保存済みの圃場は残ります）')) return;
-    points=[];activeId=null;draw();setMessage('描画をクリアしました。');
+    points=[];activeId=null;pointSets[measureMode]=points;activeIds[measureMode]=null;draw();setMessage('描画をクリアしました。');
   });
   $('fitBtn').addEventListener('click', () => {
     if (!points.length) return;
@@ -348,23 +415,27 @@
     $('savedCount').textContent=`(${fields.length})`;
     const sorted=[...fields].sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));
     $('savedList').innerHTML = sorted.length ? sorted.map(f=>{
-      const area=computeArea(f.points);
-      return `<div class="saveditem"><div class="savedtext"><span class="savedname">${escapeHtml(f.name)}</span><div class="savedmeta">${fixed(area,1)} m² ・ ${fixed(area/100)} a</div></div><button class="minibtn" data-load="${escapeHtml(f.id)}">表示</button><button class="minibtn del" data-delete="${escapeHtml(f.id)}">削除</button></div>`;
+      const isLine=f.kind==='distance';
+      const meta=isLine ? '📏 '+distanceLabel(computeDistance(f.points)) :
+        '▧ '+fixed(computeArea(f.points),1)+' m² ・ '+fixed(computeArea(f.points)/100)+' a';
+      return `<div class="saveditem"><div class="savedtext"><span class="savedname">${escapeHtml(f.name)}</span><div class="savedmeta">${meta}</div></div><button class="minibtn" data-load="${escapeHtml(f.id)}">表示</button><button class="minibtn del" data-delete="${escapeHtml(f.id)}">削除</button></div>`;
     }).join('') : '<div class="empty">まだ保存されていません。</div>';
   }
   $('saveBtn').addEventListener('click', () => {
-    if(!validPolygon()) {setMessage('3点以上の交差しない範囲を選んでください。',true);return;}
+    if(measureMode==='area' && !validPolygon()) {setMessage('3点以上の交差しない範囲を選んでください。',true);return;}
+    if(measureMode==='distance' && !validDistance()) {setMessage('2点以上の測定線を指定してください。',true);return;}
     const previous=fields.find(f=>f.id===activeId);
-    const proposed=previous ? previous.name : `圃場 ${fields.length+1}`;
-    const name=prompt('圃場の名前を入力してください',proposed);
+    const proposed=previous ? previous.name :
+      (measureMode==='area'?`圃場 ${fields.length+1}`:`距離測定 ${fields.length+1}`);
+    const name=prompt(measureMode==='area'?'圃場の名前を入力してください':'距離測定の名前を入力してください',proposed);
     if(name==null) return;
     const clean=name.trim().slice(0,80);
     if(!clean){setMessage('圃場名を入力してください。',true);return;}
     const stamp=new Date().toISOString();
-    const data={id:activeId || `field-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,name:clean,points:points.map(p=>({lat:p.lat,lng:p.lng})),updatedAt:stamp,createdAt:previous?.createdAt||stamp};
+    const data={id:activeId || `field-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,kind:measureMode,name:clean,points:points.map(p=>({lat:p.lat,lng:p.lng})),updatedAt:stamp,createdAt:previous?.createdAt||stamp};
     fields=fields.filter(f=>f.id!==data.id);
     fields.push(data);
-    if(persistFields()) {activeId=data.id;renderSaved();setMessage(`「${clean}」をこの端末に保存しました。`);}
+    if(persistFields()) {activeId=data.id;activeIds[measureMode]=activeId;renderSaved();setMessage(`「${clean}」をこの端末に保存しました。`);}
   });
   $('savedList').addEventListener('click', e => {
     const btn=e.target.closest('button');
@@ -375,8 +446,11 @@
       const field=fields.find(f=>f.id===loadId);
       if(!field)return;
       if(points.length && !confirm('現在の描画を置き換えて、保存済みの圃場を表示しますか？')) return;
+      setMode(field.kind==='distance'?'distance':'area');
       points=field.points.map(p=>({lat:+p.lat,lng:+p.lng}));
+      pointSets[measureMode]=points;
       activeId=field.id;
+      activeIds[measureMode]=activeId;
       draw();
       $('fitBtn').click();
       setMessage(`「${field.name}」を読み込みました。頂点の移動後に再保存できます。`);
@@ -386,7 +460,8 @@
       if(!field || !confirm(`保存済みの「${field.name}」を削除しますか？`))return;
       fields=fields.filter(f=>f.id!==delId);
       if(activeId===delId)activeId=null;
-      persistFields();renderSaved();setMessage('保存済みの圃場を削除しました。');
+      for(const k of ['area','distance']) if(activeIds[k]===delId)activeIds[k]=null;
+      persistFields();renderSaved();setMessage('保存済みの測定を削除しました。');
     }
   });
   function downloadText(filename,text,type) {
@@ -398,7 +473,7 @@
   }
   function getExportFields() {
     if(fields.length) return fields;
-    if(validPolygon()) return [{id:'temporary',name:'未保存の圃場',points,updatedAt:new Date().toISOString()}];
+    if(measureMode==='area' && validPolygon() || measureMode==='distance' && validDistance()) return [{id:'temporary',kind:measureMode,name:measureMode==='area'?'未保存の圃場':'未保存の距離',points,updatedAt:new Date().toISOString()}];
     setMessage('先に範囲を指定して保存してください。',true);
     return [];
   }
@@ -409,17 +484,27 @@
   }
   $('csvBtn').addEventListener('click', () => {
     const list=getExportFields();if(!list.length)return;
-    const header=['圃場名','面積m2','面積a','面積ha','面積反','更新日時','緯度経度'];
+    const header=['測定名','種別','面積m2','面積a','面積ha','面積反','距離m','距離km','更新日時','緯度経度'];
     const rows=list.map(f=>{
-      const m2=computeArea(f.points);
-      return [f.name,m2.toFixed(2),(m2/100).toFixed(4),(m2/10000).toFixed(6),(m2/TAN_M2).toFixed(5),f.updatedAt||'',f.points.map(p=>`${p.lat.toFixed(7)} ${p.lng.toFixed(7)}`).join('; ')].map(safeCsvCell).join(',');
+      const line=f.kind==='distance';
+      const m2=line?null:computeArea(f.points);
+      const m=computeDistance(f.points,!line);
+      return [f.name,line?'距離':'面積',line?'':m2.toFixed(2),line?'':(m2/100).toFixed(4),line?'':(m2/10000).toFixed(6),line?'':(m2/TAN_M2).toFixed(5),
+        m.toFixed(2),(m/1000).toFixed(5),f.updatedAt||'',f.points.map(p=>`${p.lat.toFixed(7)} ${p.lng.toFixed(7)}`).join('; ')].map(safeCsvCell).join(',');
     });
     downloadText('hojo_areas.csv','\ufeff'+[header.map(safeCsvCell).join(','),...rows].join('\r\n'),'text/csv;charset=utf-8');
     setMessage('CSVファイルを書き出しました。');
   });
   $('geoBtn').addEventListener('click', () => {
     const list=getExportFields();if(!list.length)return;
-    const geojson={type:'FeatureCollection',features:list.map(f=>({type:'Feature',properties:{name:f.name,area_m2:+computeArea(f.points).toFixed(2),updated_at:f.updatedAt},geometry:{type:'Polygon',coordinates:[[...f.points.map(p=>[p.lng,p.lat]),[f.points[0].lng,f.points[0].lat]]]}}))};
+    const geojson={type:'FeatureCollection',features:list.map(f=>{
+      const line=f.kind==='distance';
+      const coords=f.points.map(p=>[p.lng,p.lat]);
+      return {type:'Feature',properties:{name:f.name,measurement_type:line?'distance':'area',
+        area_m2:line?null:+computeArea(f.points).toFixed(2),
+        length_m:+computeDistance(f.points,!line).toFixed(2),updated_at:f.updatedAt},
+        geometry:line?{type:'LineString',coordinates:coords}:{type:'Polygon',coordinates:[[...coords,coords[0]]]}};
+    })};
     downloadText('hojo_areas.geojson',JSON.stringify(geojson,null,2),'application/geo+json;charset=utf-8');
     setMessage('GeoJSONファイルを書き出しました。');
   });
