@@ -22,9 +22,6 @@
     .gpsstate{font-size:.72rem;color:#edfaef;border:1px solid #7ca698;border-radius:20px;padding:6px 9px;white-space:nowrap;max-width:48vw;overflow:hidden;text-overflow:ellipsis}
     .mapwrap{position:relative;min-width:0;min-height:0;background:#dae3df}
     #map{position:absolute;inset:0}
-    .maptools{position:absolute;z-index:500;top:10px;right:10px;display:flex;border-radius:11px;overflow:hidden;box-shadow:0 2px 9px #152e2442}
-    .maptools button{border:0;padding:10px 12px;background:white;color:#203c30;font-weight:700;font-size:.85rem}
-    .maptools button.active{background:var(--green);color:white}
     .maphint{position:absolute;z-index:450;left:10px;top:10px;max-width:55%;background:#fffef0e8;color:#355441;border:1px solid #e5e4c2;padding:8px 10px;border-radius:10px;font-size:.75rem;line-height:1.45;pointer-events:none}
     .leaflet-control-zoom{border:0!important;box-shadow:0 2px 8px #0002!important}
     .leaflet-control-attribution{font-size:10px!important;background:#fffd!important}
@@ -70,6 +67,32 @@
       .panel{padding-top:8px}
       .area-value{font-size:1.65rem}
     }
+
+    /* Full-screen satellite imagery, compact overlays and collapsible controls */
+    .app{display:block;position:relative;height:100dvh;width:100vw;overflow:hidden}
+    .mapwrap{position:absolute;inset:0;width:100%;height:100%;background:#34433b}
+    #map{position:absolute;inset:0;width:100%;height:100%}
+    .topbar{position:absolute;z-index:650;top:calc(8px + env(safe-area-inset-top));left:10px;right:10px;min-height:0;padding:8px 11px;border-radius:12px;background:rgba(23,74,59,.95);box-shadow:0 2px 12px #0005;pointer-events:none}
+    .brand{font-size:.93rem}.subbrand{display:none}.gpsstate{font-size:.68rem;padding:5px 7px}
+    .areaHud{position:absolute;z-index:620;top:calc(67px + env(safe-area-inset-top));left:10px;max-width:calc(100vw - 90px);width:max-content;padding:8px 10px 7px;background:#fffffff0;border-radius:13px;box-shadow:0 2px 12px #0005;pointer-events:none}
+    .areaHud .area-value{font-size:1.55rem}.areaHud .area-value small{font-size:.8rem}
+    .areaHud .conversion{font-size:.73rem;margin:2px 0 0;line-height:1.4}.areaHud .eyebrow{font-size:.7rem}.areaHud .count{font-size:.67rem;padding:4px 7px}
+    .maphint{top:auto;bottom:calc(74px + env(safe-area-inset-bottom));max-width:min(86vw,410px);padding:6px 9px;background:#fffef0dc;box-shadow:0 1px 6px #0003}
+    .quicktools{position:absolute;z-index:680;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));display:flex;gap:7px}
+    .quicktools .btn{flex:1;min-width:0;min-height:46px;padding:7px 5px;font-size:.85rem;box-shadow:0 2px 11px #0006}
+    .leaflet-top.leaflet-right{top:calc(65px + env(safe-area-inset-top))}
+    .scrim{position:absolute;z-index:900;inset:0;background:#09170e66}
+    .scrim[hidden],.panel[hidden]{display:none!important}
+    .panel{position:absolute;z-index:910;left:0;right:0;bottom:0;width:100%;max-height:min(75dvh,730px);min-height:0;overflow:auto;background:#fff;border-radius:18px 18px 0 0;padding:15px 14px calc(22px + env(safe-area-inset-bottom));box-shadow:0 -4px 22px #0005}
+    .panelHeader{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:13px;font-size:1rem}
+    @media(min-width:850px){
+      .app{display:block;grid-template-columns:none;grid-template-rows:none}
+      .topbar{left:14px;right:auto;min-width:290px}
+      .mapwrap{position:absolute;grid-column:auto;grid-row:auto}
+      .panel{left:auto;right:14px;bottom:14px;width:375px;max-height:calc(100dvh - 100px);border-radius:16px}
+      .quicktools{left:14px;right:auto;width:360px}.areaHud{left:14px;max-width:370px}
+    }
+    @media(max-height:700px) and (max-width:849px){.app{display:block;grid-template-rows:none}.panel{padding-top:15px}.areaHud .area-value{font-size:1.35rem}}
   </style>
 </head>
 <body>
@@ -80,20 +103,23 @@
   </header>
   <main class="mapwrap">
     <div id="map" aria-label="地図上で圃場の境界を選択"></div>
-    <div class="maphint" id="mapHint">地図を3点以上タップして、測りたい範囲を囲んでください。</div>
-    <div class="maptools" aria-label="背景地図を切り替え">
-      <button id="streetBtn" class="active" type="button" aria-pressed="true">地図</button>
-      <button id="photoBtn" type="button" aria-pressed="false">航空写真</button>
+    <div class="maphint" id="mapHint">航空写真を3点以上タップして、測りたい範囲を囲んでください。</div>
+    <div class="areaHud" aria-live="polite">
+      <div class="area-top"><div class="eyebrow">選択範囲の面積</div><div id="pointCount" class="count">0地点</div></div>
+      <div class="area-value"><span id="areaMain">—</span> <small>m²</small></div>
+      <div id="conversion" class="conversion">3点以上で面積を表示します</div>
     </div>
-  </main>
-  <aside class="panel">
-    <div class="area-top"><div class="eyebrow">選択範囲の面積</div><div id="pointCount" class="count">0地点</div></div>
-    <div class="area-value"><span id="areaMain">—</span> <small>m²</small></div>
-    <div id="conversion" class="conversion">3点以上で面積を表示します</div>
-    <div class="toolbar">
-      <button class="btn btn-primary" id="gpsBtn" type="button">⌖ 現在地を表示</button>
-      <button class="btn btn-accent" id="addGpsBtn" type="button" disabled>＋ GPS地点を追加</button>
+    <nav class="quicktools" aria-label="計測の操作">
+      <button class="btn btn-primary" id="gpsBtn" type="button">⌖ 現在地</button>
       <button class="btn" id="undoBtn" type="button" disabled>↶ 1点戻す</button>
+      <button class="btn btn-primary" id="panelToggle" type="button" aria-controls="panel" aria-expanded="false">☰ 操作・保存</button>
+    </nav>
+  </main>
+  <div id="scrim" class="scrim" hidden></div>
+  <aside class="panel" id="panel" aria-label="操作・保存" hidden>
+    <div class="panelHeader"><strong>操作・保存</strong><button type="button" id="panelClose" class="minibtn">閉じる ✕</button></div>
+    <div class="toolbar">
+      <button class="btn btn-accent" id="addGpsBtn" type="button" disabled>＋ GPS地点を追加</button>
       <button class="btn btn-danger" id="clearBtn" type="button" disabled>✕ 描画をクリア</button>
       <button class="btn btn-primary" id="saveBtn" type="button" disabled>▣ この圃場を保存</button>
       <button class="btn" id="fitBtn" type="button" disabled>▢ 範囲を全表示</button>
@@ -131,8 +157,6 @@
   let gpsAccuracyCircle = null;
   let hasCenteredFromGps = false;
   let photoLayer;
-  let streetLayer;
-  let currentLayer;
   let polygon;
   let polyline;
 
@@ -194,33 +218,28 @@
     setMessage('ネット接続が必要です。', true);
     return;
   }
-  const map = L.map('map', {zoomControl:false, preferCanvas:true, maxZoom:20}).setView([36.2, 138.25], 6);
-  L.control.zoom({position:'bottomright'}).addTo(map);
-  streetLayer = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
-    attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a>',
-    maxNativeZoom:18,maxZoom:20
-  });
+  const map = L.map('map', {zoomControl:false, preferCanvas:true, minZoom:14, maxZoom:20}).setView([34.5, 133.5], 15);
+  L.control.zoom({position:'topright'}).addTo(map);
   photoLayer = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {
     attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">航空写真：国土地理院</a>',
     minZoom:14,maxNativeZoom:18,maxZoom:20
   });
-  currentLayer = streetLayer.addTo(map);
+  photoLayer.addTo(map);
   polygon = L.polygon([], {color:'#ffb62e',weight:3,fillColor:'#ffcb4b',fillOpacity:.25,interactive:false}).addTo(map);
   polyline = L.polyline([], {color:'#ffb62e',weight:3,dashArray:'7,6',interactive:false}).addTo(map);
-  function setLayer(kind) {
-    const usePhoto = kind === 'photo';
-    map.removeLayer(currentLayer);
-    currentLayer = usePhoto ? photoLayer : streetLayer;
-    currentLayer.addTo(map);
-    currentLayer.bringToBack();
-    if (usePhoto && map.getZoom()<14) map.setZoom(15);
-    $('photoBtn').classList.toggle('active', usePhoto);
-    $('streetBtn').classList.toggle('active', !usePhoto);
-    $('photoBtn').setAttribute('aria-pressed', String(usePhoto));
-    $('streetBtn').setAttribute('aria-pressed', String(!usePhoto));
+  function setPanelOpen(open) {
+    $('panel').hidden = !open;
+    $('scrim').hidden = !open;
+    $('panelToggle').setAttribute('aria-expanded', String(open));
+    if (open) $('panelClose').focus();
+    else $('panelToggle').focus();
   }
-  $('streetBtn').addEventListener('click', () => setLayer('street'));
-  $('photoBtn').addEventListener('click', () => setLayer('photo'));
+  $('panelToggle').addEventListener('click', () => setPanelOpen($('panel').hidden));
+  $('panelClose').addEventListener('click', () => setPanelOpen(false));
+  $('scrim').addEventListener('click', () => setPanelOpen(false));
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !$('panel').hidden) setPanelOpen(false);
+  });
   map.on('click', e => addPoint({lat:e.latlng.lat, lng:e.latlng.lng}));
   function addPoint(point) {
     if (points.length >= 80) { setMessage('1つの圃場は80点まで登録できます。', true); return; }
@@ -258,7 +277,7 @@
     $('undoBtn').disabled = points.length === 0;
     $('clearBtn').disabled = points.length === 0;
     $('fitBtn').disabled = points.length === 0;
-    $('mapHint').textContent = points.length===0 ? '地図を3点以上タップして、測りたい範囲を囲んでください。' :
+    $('mapHint').textContent = points.length===0 ? '航空写真を3点以上タップして、測りたい範囲を囲んでください。' :
       (intersect ? '線が交差しています。番号付きの点をドラッグして調整してください。' : 'さらに点を追加できます。番号付きの点はドラッグで調整できます。');
     polygon.setStyle({color:intersect?'#c74035':'#ffb62e',fillColor:intersect?'#de6551':'#ffcb4b'});
   }
@@ -271,6 +290,7 @@
     if (!points.length) return;
     if(points.length===1) map.setView([points[0].lat,points[0].lng],18);
     else map.fitBounds(L.latLngBounds(points.map(p => [p.lat,p.lng])), {padding:[35,35],maxZoom:19});
+    setPanelOpen(false);
   });
   function gpsError(error) {
     const reason = error && error.code===1 ? '位置情報の利用が許可されていません。Chromeの設定を確認してください。' :
@@ -405,6 +425,11 @@
   });
   renderSaved();
   draw();
+  if (navigator.permissions && navigator.geolocation && window.isSecureContext) {
+    navigator.permissions.query({name:'geolocation'}).then(p => {
+      if (p.state === 'granted') startGPS();
+    }).catch(() => {});
+  }
   if('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('./sw.js').catch(()=>{});
 })();
 </script>
