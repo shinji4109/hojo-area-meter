@@ -1,0 +1,11 @@
+{
+  "name": "圃場面積メジャー",
+  "short_name": "圃場面積",
+  "description": "航空写真とGPSで圃場面積を測るアプリ",
+  "lang": "ja",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "theme_color": "#174a3b",
+  "background_color": "#eef3ef"
+}
