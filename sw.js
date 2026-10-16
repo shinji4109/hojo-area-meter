@@ -1,5 +1,5 @@
 // Offline shell and update-safe page loading
-const CACHE = 'hojo-area-shell-v2';
+const CACHE = 'hojo-area-shell-v3';
 const ASSETS = ['./', './index.html', './manifest.webmanifest'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)));
